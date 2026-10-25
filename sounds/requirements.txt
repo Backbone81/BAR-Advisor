@@ -1,0 +1,9 @@
+# Versions the voice lines were generated with (Python 3.12). piper-tts and numpy are used directly, the rest are
+# their dependencies; onnxruntime runs the voice model, so a different version may change how a line sounds.
+flatbuffers==25.12.19
+numpy==2.5.4
+onnxruntime==1.31.0
+packaging==26.3
+pathvalidate==3.3.1
+piper-tts==1.8.0
+protobuf==7.36.2
