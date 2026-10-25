@@ -1,4 +1,4 @@
-# bar-advisor
+# BAR Advisor
 
 A voice advisor widget for [Beyond All Reason](https://www.beyondallreason.info/). It watches your own units and
 income and reminds you, by voice, of things that are easy to forget mid-game: idle constructors, teching up, anti-air
