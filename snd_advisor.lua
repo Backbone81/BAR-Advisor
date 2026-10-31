@@ -3,7 +3,7 @@ local widget = widget ---@type Widget
 function widget:GetInfo()
 	return {
 		name = "Advisor",
-		desc = "Voice reminders: idle builders, tech 2 and 3, anti-air, anti-nuke, energy storage and converters",
+		desc = "Voice reminders: idle builders, tech 2 and 3, anti-air, anti-nuke, long-range plasma cannon, energy",
 		author = "Backbone",
 		date = "October 2026",
 		license = "GNU GPL, v2 or later",
@@ -12,9 +12,10 @@ function widget:GetInfo()
 	}
 end
 
--- Reminds the player of what is easy to forget: idle builders, teching up, anti-air, an anti-nuke, energy storage and
--- converting surplus energy. Every ANNOUNCEMENT_SECONDS one announcement slot comes up, and the most overdue active
--- reminder (time past its own interval) gets it; priority only breaks ties, so no reminder can crowd out the others.
+-- Reminds the player of what is easy to forget: idle builders, teching up, anti-air, an anti-nuke, a long-range plasma
+-- cannon, energy storage and converting surplus energy. Every ANNOUNCEMENT_SECONDS one announcement slot comes up, and
+-- the most overdue active reminder (time past its own interval) gets it; priority only breaks ties, so no reminder can
+-- crowd out the others.
 -- Uses only the player's own team (units and income) and gives no orders. When watching a replay it follows every
 -- team except Gaia and logs "[reminder]" lines instead of playing sounds, to test it on past games.
 
@@ -57,8 +58,9 @@ local ENERGY_STORAGE_MIN = 7000
 -- A long-range plasma cannon (Basilica, Basilisk, Olympus) fires only when its whole shot energy is in storage: 6000
 -- for Basilisk and Olympus (one 3-shot salvo), 5000 for Basilica. The converters keep storage near their level (slider,
 -- default 75%) and energy above the share level leaves, so only storage up to the lower of the two counts: at the
--- defaults 8000 storage. Storage is asked for once a cannon is due, like a lab at about 90 s of income (Basilisk
--- 4600 metal, 67000 energy), or when one is started.
+-- defaults 8000 storage. A cannon is due like a lab at about 90 s of income (Basilisk 4600 metal, 67000 energy), with
+-- a T2 constructor to build it; then the cannon is suggested if the storage holds a shot, storage is asked for if not.
+-- Storage is also asked for while a started cannon could not fire. No time fallback: a cannon is an option, not a must.
 local LRPC_METAL_PER_SECOND = 50
 local LRPC_ENERGY_PER_SECOND = 750
 local LRPC_ENERGY_PER_SHOT = 6000
@@ -114,6 +116,12 @@ local REMINDERS = {
 		interval = 120,
 		priority = 1,
 		text = "Consider tech 3",
+	},
+	{
+		key = "consider_long_range_plasma_cannon",
+		interval = 120,
+		priority = 1,
+		text = "Consider a long-range plasma cannon",
 	},
 	{
 		key = "build_energy_storage",
@@ -440,8 +448,7 @@ local function evaluateConditions(team, frame)
 
 	local hasLongRange = next(team.longRangeUnits) ~= nil
 	local lrpcDue = tech2BuilderCount > 0 and not hasLongRange and lrpcMetalHeld and lrpcEnergyHeld
-	local tooLittleStorageForShot = (lrpcDue or hasLongRange)
-		and getUsableEnergyStorage(team, energyStorage, energyShare) < LRPC_ENERGY_PER_SHOT
+	local storageHoldsShot = getUsableEnergyStorage(team, energyStorage, energyShare) >= LRPC_ENERGY_PER_SHOT
 	local noEnergyStorage = energyStorage < ENERGY_STORAGE_MIN
 
 	local commanderMuted = COMMANDER_MUTE_TECH2_BUILDERS ~= nil and tech2BuilderCount >= COMMANDER_MUTE_TECH2_BUILDERS
@@ -457,8 +464,9 @@ local function evaluateConditions(team, frame)
 			and tech3IncomeHeld,
 		build_anti_air = minutes >= ANTIAIR_MINUTES and count(team.antiAirUnits) < ANTIAIR_MIN_COUNT,
 		build_anti_nuke = not hasReadyAntiNuke(team) and (minutes >= ANTINUKE_MINUTES or antiNukeIncomeHeld),
+		consider_long_range_plasma_cannon = lrpcDue and storageHoldsShot,
 		build_energy_storage = (noEnergyStorage and (minutes >= ENERGY_STORAGE_MINUTES or energyNearShareHeld))
-			or tooLittleStorageForShot,
+			or ((lrpcDue or hasLongRange) and not storageHoldsShot),
 		consider_energy_converters = energyNearShareHeld and not noEnergyStorage,
 	}
 	return active, idleCountByKey
