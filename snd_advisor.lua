@@ -3,7 +3,7 @@ local widget = widget ---@type Widget
 function widget:GetInfo()
 	return {
 		name = "Advisor",
-		desc = "Voice reminders: idle commander/T1/T2 builders, tech 2, tech 3, anti-air, anti-nuke, energy converters",
+		desc = "Voice reminders: idle builders, tech 2 and 3, anti-air, anti-nuke, energy storage and converters",
 		author = "Backbone",
 		date = "October 2026",
 		license = "GNU GPL, v2 or later",
@@ -12,9 +12,9 @@ function widget:GetInfo()
 	}
 end
 
--- Reminds the player of what is easy to forget: idle builders, teching up, anti-air, an anti-nuke and converting
--- surplus energy. Every ANNOUNCEMENT_SECONDS one announcement slot comes up, and the most overdue active reminder
--- (time past its own interval) gets it; priority only breaks ties, so no reminder can crowd out the others.
+-- Reminds the player of what is easy to forget: idle builders, teching up, anti-air, an anti-nuke, energy storage and
+-- converting surplus energy. Every ANNOUNCEMENT_SECONDS one announcement slot comes up, and the most overdue active
+-- reminder (time past its own interval) gets it; priority only breaks ties, so no reminder can crowd out the others.
 -- Uses only the player's own team (units and income) and gives no orders. When watching a replay it follows every
 -- team except Gaia and logs "[reminder]" lines instead of playing sounds, to test it on past games.
 
@@ -47,6 +47,23 @@ local ANTINUKE_METAL_PER_SECOND = 80 -- if you can afford a nuke, so can an equa
 -- share level means the converters can't keep up with the surplus.
 local ENERGY_SHARE_MARGIN = 0.05 -- "near": within this fraction of storage below the share level
 local ENERGY_HOLD_SECONDS = 60
+
+-- Energy storage: a team starts with 1000 (BAR's minimum; the commander's 500 is not added), one T1 energy storage adds
+-- 6000. BARb Hard builds its first at about 5 min. Before that time, energy near the share level asks for storage
+-- instead of converters while there is none: 175 metal is the cheaper fix.
+local ENERGY_STORAGE_MINUTES = 6
+local ENERGY_STORAGE_MIN = 7000
+
+-- A long-range plasma cannon (Basilica, Basilisk, Olympus) fires only when its whole shot energy is in storage: 6000
+-- for Basilisk and Olympus (one 3-shot salvo), 5000 for Basilica. The converters keep storage near their level (slider,
+-- default 75%) and energy above the share level leaves, so only storage up to the lower of the two counts: at the
+-- defaults 8000 storage. Storage is asked for once a cannon is due, like a lab at about 90 s of income (Basilisk
+-- 4600 metal, 67000 energy), or when one is started.
+local LRPC_METAL_PER_SECOND = 50
+local LRPC_ENERGY_PER_SECOND = 750
+local LRPC_ENERGY_PER_SHOT = 6000
+local LONG_RANGE_MIN_RANGE = 4000 -- static weapons from this range, not stockpiled: the cannons and the rapid-fire ones
+local DEFAULT_CONVERSION_LEVEL = 0.75 -- game_energy_conversion.lua, if its "mmLevel" team rules param is missing
 
 ---@class Reminder
 ---@field key string condition, log name and voice line sounds/<key>.wav (spoken text in sounds/<key>.txt)
@@ -99,6 +116,12 @@ local REMINDERS = {
 		text = "Consider tech 3",
 	},
 	{
+		key = "build_energy_storage",
+		interval = 60,
+		priority = 1,
+		text = "Build energy storage",
+	},
+	{
 		key = "consider_energy_converters",
 		interval = 60,
 		priority = 1,
@@ -127,6 +150,7 @@ local spGetSpectatingState = Spring.GetSpectatingState
 local spGetTeamInfo = Spring.GetTeamInfo
 local spGetTeamList = Spring.GetTeamList
 local spGetTeamResources = Spring.GetTeamResources
+local spGetTeamRulesParam = Spring.GetTeamRulesParam
 local spGetTeamUnits = Spring.GetTeamUnits
 local spGetUnitCommandCount = Spring.GetUnitCommandCount
 local spGetUnitDefID = Spring.GetUnitDefID
@@ -149,6 +173,7 @@ local isTech2FactoryDef = {} -- tech 3 factories count too: they are past tech 2
 local isTech3FactoryDef = {}
 local isAntiAirDef = {}
 local isAntiNukeDef = {}
+local isLongRangeDef = {} -- long-range plasma cannons and the rapid-fire ones
 
 ---@class WatchedTeam
 ---@field teamID number
@@ -160,8 +185,9 @@ local isAntiNukeDef = {}
 ---@field finishedTech2Factories table<number, true>
 ---@field antiAirUnits table<number, true>
 ---@field antiNukeUnits table<number, true>
+---@field longRangeUnits table<number, true> started, finished or not
 ---@field reminderStates table<string, { activeSince: number, lastPlayedFrame: number? }> key -> state, while active
----@field incomeHeldSince table<number, number> threshold -> frame since when metal income has been at or above it
+---@field incomeHeldSince table<string, number> resource and threshold -> frame since income has been at or above it
 ---@field energyNearShareSince number|false frame since when stored energy has been near the share level
 
 ---@type table<number, WatchedTeam>
@@ -184,6 +210,7 @@ local function removeUnit(team, unitID)
 	team.finishedTech2Factories[unitID] = nil
 	team.antiAirUnits[unitID] = nil
 	team.antiNukeUnits[unitID] = nil
+	team.longRangeUnits[unitID] = nil
 end
 
 local function addUnit(team, unitID, unitDefID, finished)
@@ -192,6 +219,9 @@ local function addUnit(team, unitID, unitDefID, finished)
 	end
 	if isTech3FactoryDef[unitDefID] then
 		team.tech3Factories[unitID] = true
+	end
+	if isLongRangeDef[unitDefID] then
+		team.longRangeUnits[unitID] = true
 	end
 	if not finished then
 		return
@@ -231,6 +261,7 @@ local function watchTeam(teamID)
 		finishedTech2Factories = {},
 		antiAirUnits = {},
 		antiNukeUnits = {},
+		longRangeUnits = {},
 		reminderStates = {},
 		incomeHeldSince = {},
 		energyNearShareSince = false,
@@ -293,6 +324,10 @@ local function classifyUnitDefs()
 			if weaponDef and weaponDef.interceptor and weaponDef.interceptor ~= 0 then
 				isAntiNukeDef[unitDefID] = true
 			end
+			local isLongRange = weaponDef and weaponDef.range >= LONG_RANGE_MIN_RANGE and not weaponDef.stockpile
+			if isLongRange and not unitDef.canMove then
+				isLongRangeDef[unitDefID] = true
+			end
 		end
 	end
 end
@@ -334,15 +369,22 @@ local function count(set)
 	return total
 end
 
--- Must be called every check for each threshold, so that its hold time keeps counting.
-local function isIncomeHeld(team, metalIncome, threshold, frame)
+-- Must be called every check for each resource and threshold, so that its hold time keeps counting.
+local function isIncomeHeld(team, resource, income, threshold, frame)
 	local incomeHeldSince = team.incomeHeldSince
-	if metalIncome >= threshold then
-		incomeHeldSince[threshold] = incomeHeldSince[threshold] or frame
+	local key = resource .. threshold
+	if income >= threshold then
+		incomeHeldSince[key] = incomeHeldSince[key] or frame
 	else
-		incomeHeldSince[threshold] = nil
+		incomeHeldSince[key] = nil
 	end
-	return incomeHeldSince[threshold] ~= nil and frame - incomeHeldSince[threshold] >= INCOME_HOLD_FRAMES
+	return incomeHeldSince[key] ~= nil and frame - incomeHeldSince[key] >= INCOME_HOLD_FRAMES
+end
+
+-- Energy storage left for a big shot while the converters run and energy above the share level goes to allies.
+local function getUsableEnergyStorage(team, storage, share)
+	local conversionLevel = spGetTeamRulesParam(team.teamID, "mmLevel") or DEFAULT_CONVERSION_LEVEL
+	return storage * math.min(conversionLevel, share or 1)
 end
 
 -- Must be called every check, so that the hold time keeps counting.
@@ -385,10 +427,23 @@ local function evaluateConditions(team, frame)
 
 	local _, _, _, metalIncome = spGetTeamResources(team.teamID, "metal")
 	metalIncome = metalIncome or 0
+	local _, energyStorage, _, energyIncome, _, energyShare = spGetTeamResources(team.teamID, "energy")
+	energyStorage = energyStorage or 0
+	energyIncome = energyIncome or 0
 	local minutes = frame / GAME_SPEED / 60
-	local tech2IncomeHeld = isIncomeHeld(team, metalIncome, TECH2_METAL_PER_SECOND, frame)
-	local tech3IncomeHeld = isIncomeHeld(team, metalIncome, TECH3_METAL_PER_SECOND, frame)
-	local antiNukeIncomeHeld = isIncomeHeld(team, metalIncome, ANTINUKE_METAL_PER_SECOND, frame)
+	local tech2IncomeHeld = isIncomeHeld(team, "metal", metalIncome, TECH2_METAL_PER_SECOND, frame)
+	local tech3IncomeHeld = isIncomeHeld(team, "metal", metalIncome, TECH3_METAL_PER_SECOND, frame)
+	local antiNukeIncomeHeld = isIncomeHeld(team, "metal", metalIncome, ANTINUKE_METAL_PER_SECOND, frame)
+	local lrpcMetalHeld = isIncomeHeld(team, "metal", metalIncome, LRPC_METAL_PER_SECOND, frame)
+	local lrpcEnergyHeld = isIncomeHeld(team, "energy", energyIncome, LRPC_ENERGY_PER_SECOND, frame)
+	local energyNearShareHeld = isEnergyNearShareHeld(team, frame)
+
+	local hasLongRange = next(team.longRangeUnits) ~= nil
+	local lrpcDue = tech2BuilderCount > 0 and not hasLongRange and lrpcMetalHeld and lrpcEnergyHeld
+	local tooLittleStorageForShot = (lrpcDue or hasLongRange)
+		and getUsableEnergyStorage(team, energyStorage, energyShare) < LRPC_ENERGY_PER_SHOT
+	local noEnergyStorage = energyStorage < ENERGY_STORAGE_MIN
+
 	local commanderMuted = COMMANDER_MUTE_TECH2_BUILDERS ~= nil and tech2BuilderCount >= COMMANDER_MUTE_TECH2_BUILDERS
 
 	local active = {
@@ -402,7 +457,9 @@ local function evaluateConditions(team, frame)
 			and tech3IncomeHeld,
 		build_anti_air = minutes >= ANTIAIR_MINUTES and count(team.antiAirUnits) < ANTIAIR_MIN_COUNT,
 		build_anti_nuke = not hasReadyAntiNuke(team) and (minutes >= ANTINUKE_MINUTES or antiNukeIncomeHeld),
-		consider_energy_converters = isEnergyNearShareHeld(team, frame),
+		build_energy_storage = (noEnergyStorage and (minutes >= ENERGY_STORAGE_MINUTES or energyNearShareHeld))
+			or tooLittleStorageForShot,
+		consider_energy_converters = energyNearShareHeld and not noEnergyStorage,
 	}
 	return active, idleCountByKey
 end
