@@ -3,7 +3,7 @@ local widget = widget ---@type Widget
 function widget:GetInfo()
 	return {
 		name = "Advisor",
-		desc = "Voice reminders: idle commander/T1/T2 builders, tech 2, tech 3, anti-air, anti-nuke",
+		desc = "Voice reminders: idle commander/T1/T2 builders, tech 2, tech 3, anti-air, anti-nuke, energy converters",
 		author = "Backbone",
 		date = "October 2026",
 		license = "GNU GPL, v2 or later",
@@ -12,9 +12,9 @@ function widget:GetInfo()
 	}
 end
 
--- Reminds the player of what is easy to forget: idle builders, teching up, anti-air and an anti-nuke. Every
--- ANNOUNCEMENT_SECONDS one announcement slot comes up, and the most overdue active reminder (time past its own
--- interval) gets it; priority only breaks ties, so no reminder can crowd out the others.
+-- Reminds the player of what is easy to forget: idle builders, teching up, anti-air, an anti-nuke and converting
+-- surplus energy. Every ANNOUNCEMENT_SECONDS one announcement slot comes up, and the most overdue active reminder
+-- (time past its own interval) gets it; priority only breaks ties, so no reminder can crowd out the others.
 -- Uses only the player's own team (units and income) and gives no orders. When watching a replay it follows every
 -- team except Gaia and logs "[reminder]" lines instead of playing sounds, to test it on past games.
 
@@ -41,6 +41,12 @@ local ANTIAIR_MIN_COUNT = 2
 
 local ANTINUKE_MINUTES = 25
 local ANTINUKE_METAL_PER_SECOND = 80 -- if you can afford a nuke, so can an equal opponent
+
+-- Energy above the share level (top bar slider, default 95% of storage) goes to allies, or is lost when they are full
+-- or there are none. Energy converters start below that (their slider, default 75%), so energy that stays near the
+-- share level means the converters can't keep up with the surplus.
+local ENERGY_SHARE_MARGIN = 0.05 -- "near": within this fraction of storage below the share level
+local ENERGY_HOLD_SECONDS = 60
 
 ---@class Reminder
 ---@field key string condition, log name and voice line sounds/<key>.wav (spoken text in sounds/<key>.txt)
@@ -92,6 +98,12 @@ local REMINDERS = {
 		priority = 1,
 		text = "Consider tech 3",
 	},
+	{
+		key = "consider_energy_converters",
+		interval = 60,
+		priority = 1,
+		text = "Consider energy converters (energy near the share level)",
+	},
 }
 
 -- Game sounds played for a missing voice line; the first one that exists is used.
@@ -129,6 +141,7 @@ local CHECK_FRAMES = GAME_SPEED -- conditions are evaluated once per second
 local ANNOUNCEMENT_FRAMES = ANNOUNCEMENT_SECONDS * GAME_SPEED
 local IDLE_FRAMES = IDLE_SECONDS * GAME_SPEED
 local INCOME_HOLD_FRAMES = INCOME_HOLD_SECONDS * GAME_SPEED
+local ENERGY_HOLD_FRAMES = ENERGY_HOLD_SECONDS * GAME_SPEED
 
 -- Unit def lookups, filled in Initialize.
 local idleReminderKeyByDefID = {} -- key of the reminder for an idle builder of this type
@@ -149,6 +162,7 @@ local isAntiNukeDef = {}
 ---@field antiNukeUnits table<number, true>
 ---@field reminderStates table<string, { activeSince: number, lastPlayedFrame: number? }> key -> state, while active
 ---@field incomeHeldSince table<number, number> threshold -> frame since when metal income has been at or above it
+---@field energyNearShareSince number|false frame since when stored energy has been near the share level
 
 ---@type table<number, WatchedTeam>
 local watchedTeams = {} -- teamID -> team; the player's own team, or every team but Gaia in a replay
@@ -219,6 +233,7 @@ local function watchTeam(teamID)
 		antiNukeUnits = {},
 		reminderStates = {},
 		incomeHeldSince = {},
+		energyNearShareSince = false,
 	}
 	for _, unitID in ipairs(spGetTeamUnits(teamID) or {}) do
 		addUnit(team, unitID, spGetUnitDefID(unitID), isFinished(unitID))
@@ -330,6 +345,17 @@ local function isIncomeHeld(team, metalIncome, threshold, frame)
 	return incomeHeldSince[threshold] ~= nil and frame - incomeHeldSince[threshold] >= INCOME_HOLD_FRAMES
 end
 
+-- Must be called every check, so that the hold time keeps counting.
+local function isEnergyNearShareHeld(team, frame)
+	local current, storage, _, _, _, share = spGetTeamResources(team.teamID, "energy")
+	if current and storage > 0 and current >= storage * (share - ENERGY_SHARE_MARGIN) then
+		team.energyNearShareSince = team.energyNearShareSince or frame
+	else
+		team.energyNearShareSince = false
+	end
+	return team.energyNearShareSince and frame - team.energyNearShareSince >= ENERGY_HOLD_FRAMES
+end
+
 local function hasReadyAntiNuke(team)
 	for unitID in pairs(team.antiNukeUnits) do
 		if (spGetUnitStockpile(unitID) or 0) >= 1 then
@@ -376,6 +402,7 @@ local function evaluateConditions(team, frame)
 			and tech3IncomeHeld,
 		build_anti_air = minutes >= ANTIAIR_MINUTES and count(team.antiAirUnits) < ANTIAIR_MIN_COUNT,
 		build_anti_nuke = not hasReadyAntiNuke(team) and (minutes >= ANTINUKE_MINUTES or antiNukeIncomeHeld),
+		consider_energy_converters = isEnergyNearShareHeld(team, frame),
 	}
 	return active, idleCountByKey
 end

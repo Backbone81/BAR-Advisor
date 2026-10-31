@@ -1,8 +1,8 @@
 # BAR Advisor
 
 A voice advisor widget for [Beyond All Reason](https://www.beyondallreason.info/). It watches your own units and
-income and reminds you, by voice, of things that are easy to forget mid-game: idle constructors, teching up, anti-air
-and an anti-nuke.
+income and reminds you, by voice, of things that are easy to forget mid-game: idle constructors, teching up, anti-air,
+an anti-nuke and converting surplus energy.
 
 It is meant for remembering, not as orders: every reminder is something a good player would have thought of anyway.
 It plays sounds and prints a console line, and nothing else. It gives no orders and reads only what you can see
@@ -19,6 +19,7 @@ yourself (your own units and income), so it can be used wherever user widgets ar
 | Consider tech 3 | a tech 2 factory is finished, metal income has held at 90/s or more for 60 s, and no tech 3 factory is started | 120 s |
 | Build anti-air | from minute 3, while you have fewer than 2 anti-air units | 60 s |
 | Build anti-nuke | from minute 25, or once metal income has held at 80/s or more for 60 s, until an anti-nuke has a missile ready | 60 s |
+| Consider energy converters | stored energy has stayed within 5% of storage below your share level for 60 s | 60 s |
 
 Guarding or assisting counts as an order, so a constructor helping a factory is not idle. Nano turrets are never
 reported: they often wait behind the front as repair stations on purpose. Only builders that can build a metal
@@ -27,6 +28,11 @@ extractor count as constructors, so rez bots, resurrection subs, minelayers and 
 Income thresholds must hold for 60 s, because reclaiming a wreck makes income spike for a moment. They are chosen so
 that the next step costs about 90 s of income: a tech 2 lab (2600 metal) at 30 metal/s, an Experimental Gantry
 (8000 metal) at 90 metal/s. The anti-nuke threshold is the income at which an equal opponent could afford a nuke.
+
+Energy above your share level (the slider in the top bar, 95% of storage by default) goes to your allies, or is lost
+when they are full or you have none. Energy converters start converting at a lower level (their own slider, 75% by
+default), so energy that stays near the share level means your converters can't keep up with your surplus. The
+reminder follows both sliders: it reads your current share level.
 
 Only one announcement plays every 10 s. When several reminders are due, the one that is most overdue (time past its
 own interval) plays and the others wait for later slots, so no reminder can crowd out the rest.
