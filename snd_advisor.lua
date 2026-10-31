@@ -36,7 +36,7 @@ local TECH2_METAL_PER_SECOND = 30
 local TECH2_MINUTES = 14 -- nil: metal income only
 local TECH3_METAL_PER_SECOND = 90 -- no time fallback: tech 3 is an option, not a must
 
-local ANTIAIR_MINUTES = 5
+local ANTIAIR_MINUTES = 3
 local ANTIAIR_MIN_COUNT = 2
 
 local ANTINUKE_MINUTES = 25

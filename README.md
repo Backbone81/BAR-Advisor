@@ -17,7 +17,7 @@ yourself (your own units and income), so it can be used wherever user widgets ar
 | Tech 2 constructor idle | a tech 2 constructor has had no orders for 30 s | 30 s |
 | Consider tech 2 | metal income has held at 30/s or more for 60 s, or 14 minutes have passed, and no tech 2 factory is started | 120 s |
 | Consider tech 3 | a tech 2 factory is finished, metal income has held at 90/s or more for 60 s, and no tech 3 factory is started | 120 s |
-| Build anti-air | from minute 5, while you have fewer than 2 anti-air units | 60 s |
+| Build anti-air | from minute 3, while you have fewer than 2 anti-air units | 60 s |
 | Build anti-nuke | from minute 25, or once metal income has held at 80/s or more for 60 s, until an anti-nuke has a missile ready | 60 s |
 
 Guarding or assisting counts as an order, so a constructor helping a factory is not idle. Nano turrets are never
