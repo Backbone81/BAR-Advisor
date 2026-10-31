@@ -240,12 +240,23 @@ local function watchTeams()
 	end
 end
 
+-- Constructors are the builders that can build a metal extractor. Rez bots, resurrection subs, minelayers and spies
+-- build too, but aren't constructors in purpose.
+local function buildsMetalExtractor(unitDef)
+	for _, buildDefID in ipairs(unitDef.buildOptions) do
+		if UnitDefs[buildDefID].extractsMetal > 0 then
+			return true
+		end
+	end
+	return false
+end
+
 local function classifyUnitDefs()
 	for unitDefID, unitDef in pairs(UnitDefs) do
 		local customParams = unitDef.customParams
 		local techLevel = tonumber(customParams.techlevel) or 1
 		-- Nano turrets build but can't move; they often wait as repair stations on purpose, so they're left out.
-		if unitDef.isBuilder and unitDef.canMove and not unitDef.isFactory then
+		if unitDef.isBuilder and unitDef.canMove and not unitDef.isFactory and buildsMetalExtractor(unitDef) then
 			if customParams.iscommander then
 				idleReminderKeyByDefID[unitDefID] = "commander_idle"
 			else

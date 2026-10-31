@@ -21,7 +21,8 @@ yourself (your own units and income), so it can be used wherever user widgets ar
 | Build anti-nuke | from minute 25, or once metal income has held at 80/s or more for 60 s, until an anti-nuke has a missile ready | 60 s |
 
 Guarding or assisting counts as an order, so a constructor helping a factory is not idle. Nano turrets are never
-reported: they often wait behind the front as repair stations on purpose.
+reported: they often wait behind the front as repair stations on purpose. Only builders that can build a metal
+extractor count as constructors, so rez bots, resurrection subs, minelayers and spies are never reported either.
 
 Income thresholds must hold for 60 s, because reclaiming a wreck makes income spike for a moment. They are chosen so
 that the next step costs about 90 s of income: a tech 2 lab (2600 metal) at 30 metal/s, an Experimental Gantry
